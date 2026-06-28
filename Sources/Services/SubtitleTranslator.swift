@@ -52,6 +52,7 @@ struct SubtitleTranslator {
         }
 
         for (batchNumber, batch) in batches.enumerated() {
+            try Task.checkCancellation()
             let originals = batch.map { cues[$0].text }
             let translations = try await translateBatch(originals)
             for (offset, cueIndex) in batch.enumerated() {
@@ -71,25 +72,73 @@ struct SubtitleTranslator {
         return SubtitleParser.rebuild(cues)
     }
 
+    /// Translates a batch and ALWAYS returns one translation per input line.
+    /// Uses a keyed JSON protocol (robust to reordering) and repairs any
+    /// missing/mismatched entries with per-line requests, so a single model
+    /// hiccup never aborts the whole job.
     private func translateBatch(_ lines: [String]) async throws -> [String] {
-        let inputJSON = try jsonString(from: lines)
+        let dict = try await requestKeyedTranslation(lines)
+
+        var out = lines
+        var missing: [Int] = []
+        for i in lines.indices {
+            if let t = dict[i]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
+                out[i] = t
+            } else {
+                missing.append(i)
+            }
+        }
+
+        // Repair gaps individually; keep the original text if even that fails.
+        for i in missing {
+            if let t = try? await translateSingle(lines[i]),
+               !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                out[i] = t
+            }
+        }
+        return out
+    }
+
+    /// Asks the model to translate an indexed object and returns index -> text.
+    /// The result may be partial; callers fill any gaps.
+    private func requestKeyedTranslation(_ lines: [String]) async throws -> [Int: String] {
+        var inputObject: [String: String] = [:]
+        for (i, line) in lines.enumerated() { inputObject[String(i)] = line }
+        let inputJSON = jsonString(fromObject: inputObject)
         let sourceHint = sourceLanguage.map { $0.code.isEmpty ? "" : " from \($0.promptName)" } ?? ""
 
         let system = """
-        You are a professional subtitle translator. Translate each string in the \
-        provided JSON array\(sourceHint) into \(targetLanguage.promptName). Keep the \
-        meaning natural and concise for on-screen subtitles. Respond with ONLY a JSON \
-        array of strings containing exactly \(lines.count) elements, in the same order. \
-        Do not merge, split, number, or add any commentary. Preserve line breaks within \
-        an element using \\n.
+        You are a professional subtitle translator. The user message is a JSON object \
+        mapping string indices to subtitle lines. Translate each value\(sourceHint) into \
+        \(targetLanguage.promptName), keeping it natural and concise for on-screen subtitles. \
+        Respond with ONLY a JSON object that has the EXACT same keys, where each value is the \
+        translation of the matching input value. Do not add, remove, merge, or renumber keys, \
+        and do not add commentary. Preserve line breaks within a value using \\n.
         """
 
+        let content = try await chat(system: system, user: inputJSON)
+        return parseKeyed(from: content, count: lines.count)
+    }
+
+    /// Translates a single line to plain text (used to repair batch gaps).
+    private func translateSingle(_ line: String) async throws -> String {
+        let sourceHint = sourceLanguage.map { $0.code.isEmpty ? "" : " from \($0.promptName)" } ?? ""
+        let system = """
+        You are a professional subtitle translator. Translate the user's text\(sourceHint) into \
+        \(targetLanguage.promptName). Reply with ONLY the translation, no quotes or commentary.
+        """
+        let content = try await chat(system: system, user: line)
+        return content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Performs a chat-completions request and returns the assistant content.
+    private func chat(system: String, user: String) async throws -> String {
         let payload: [String: Any] = [
             "model": model,
             "temperature": 0,
             "messages": [
                 ["role": "system", "content": system],
-                ["role": "user", "content": inputJSON]
+                ["role": "user", "content": user]
             ]
         ]
 
@@ -117,18 +166,13 @@ struct SubtitleTranslator {
             let body = String(data: data, encoding: .utf8)?.prefix(500).description ?? ""
             throw TranslatorError.requestFailed(http.statusCode, body)
         }
-
-        let content = try extractMessageContent(from: data)
-        let translated = try parseJSONArray(from: content)
-        guard translated.count == lines.count else {
-            throw TranslatorError.countMismatch(expected: lines.count, got: translated.count)
-        }
-        return translated
+        return try extractMessageContent(from: data)
     }
 
-    private func jsonString(from array: [String]) throws -> String {
-        let data = try JSONSerialization.data(withJSONObject: array)
-        return String(data: data, encoding: .utf8) ?? "[]"
+    private func jsonString(fromObject object: [String: String]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let string = String(data: data, encoding: .utf8) else { return "{}" }
+        return string
     }
 
     private func extractMessageContent(from data: Data) throws -> String {
@@ -142,19 +186,35 @@ struct SubtitleTranslator {
         return content
     }
 
-    /// Extracts the JSON array of strings from the model's reply, tolerating
-    /// surrounding prose or Markdown code fences.
-    private func parseJSONArray(from content: String) throws -> [String] {
-        guard let start = content.firstIndex(of: "["),
-              let end = content.lastIndex(of: "]"),
-              start < end else {
-            throw TranslatorError.malformedResponse
+    /// Parses the model reply (a JSON object keyed by index, or a positional
+    /// JSON array as a fallback) into an index -> translation map.
+    private func parseKeyed(from content: String, count: Int) -> [Int: String] {
+        var result: [Int: String] = [:]
+
+        // Preferred: a JSON object { "0": "...", "1": "..." }.
+        if let start = content.firstIndex(of: "{"),
+           let end = content.lastIndex(of: "}"),
+           start < end,
+           let data = String(content[start...end]).data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for (key, value) in object {
+                if let index = Int(key), index >= 0, index < count {
+                    result[index] = "\(value)"
+                }
+            }
+            if !result.isEmpty { return result }
         }
-        let slice = String(content[start...end])
-        guard let data = slice.data(using: .utf8),
-              let array = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
-            throw TranslatorError.malformedResponse
+
+        // Fallback: a positional JSON array [ "...", "..." ].
+        if let start = content.firstIndex(of: "["),
+           let end = content.lastIndex(of: "]"),
+           start < end,
+           let data = String(content[start...end]).data(using: .utf8),
+           let array = try? JSONSerialization.jsonObject(with: data) as? [Any] {
+            for (i, value) in array.enumerated() where i < count {
+                result[i] = "\(value)"
+            }
         }
-        return array.map { "\($0)" }
+        return result
     }
 }

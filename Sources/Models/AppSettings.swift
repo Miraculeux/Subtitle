@@ -20,6 +20,10 @@ final class AppSettings: ObservableObject {
     @Published var bilingualOutput: Bool { didSet { defaults.set(bilingualOutput, forKey: Keys.bilingualOutput) } }
     @Published var originalOnTop: Bool { didSet { defaults.set(originalOnTop, forKey: Keys.originalOnTop) } }
 
+    // Files
+    @Published var workingDirectory: String { didSet { defaults.set(workingDirectory, forKey: Keys.workingDirectory) } }
+    @Published var keepExtractedAudio: Bool { didSet { defaults.set(keepExtractedAudio, forKey: Keys.keepExtractedAudio) } }
+
     private let defaults = UserDefaults.standard
 
     private enum Keys {
@@ -34,6 +38,8 @@ final class AppSettings: ObservableObject {
         static let translationApiKey = "translationApiKey"
         static let bilingualOutput = "bilingualOutput"
         static let originalOnTop = "originalOnTop"
+        static let workingDirectory = "workingDirectory"
+        static let keepExtractedAudio = "keepExtractedAudio"
     }
 
     init() {
@@ -48,14 +54,30 @@ final class AppSettings: ObservableObject {
 
         targetLanguage = defaults.string(forKey: Keys.targetLanguage) ?? ""
         translationServerURL = defaults.string(forKey: Keys.translationServerURL) ?? "http://127.0.0.1:1234"
-        translationModel = defaults.string(forKey: Keys.translationModel) ?? "Qwen3.5-9B-MLX-8bit"
+        translationModel = defaults.string(forKey: Keys.translationModel) ?? "qwen2.5-vl-32b-instruct"
         translationApiKey = defaults.string(forKey: Keys.translationApiKey) ?? ""
         bilingualOutput = defaults.object(forKey: Keys.bilingualOutput) as? Bool ?? false
         originalOnTop = defaults.object(forKey: Keys.originalOnTop) as? Bool ?? true
+        workingDirectory = defaults.string(forKey: Keys.workingDirectory) ?? ""
+        keepExtractedAudio = defaults.object(forKey: Keys.keepExtractedAudio) as? Bool ?? false
     }
 
     var translationEnabled: Bool {
         !targetLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Directory where the extracted audio WAV is written. Falls back to the
+    /// system temporary directory when unset or invalid.
+    var workingDirectoryURL: URL {
+        let trimmed = workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            let url = URL(fileURLWithPath: trimmed, isDirectory: true)
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+                return url
+            }
+        }
+        return FileManager.default.temporaryDirectory
     }
 
     /// Builds the full transcription endpoint from the configured base URL.

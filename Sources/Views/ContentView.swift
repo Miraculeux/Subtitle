@@ -1,9 +1,11 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var settings: AppSettings
     @StateObject private var model = TranscriptionViewModel()
     @Environment(\.openSettings) private var openSettings
+    @State private var isDropTargeted = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,6 +16,43 @@ struct ContentView: View {
             footer
         }
         .onAppear { model.attach(settings: settings) }
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleDrop(providers)
+        }
+        .overlay {
+            if isDropTargeted && !model.isRunning {
+                dropOverlay
+            }
+        }
+    }
+
+    private var dropOverlay: some View {
+        ZStack {
+            Color.accentColor.opacity(0.08)
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [8]))
+                .padding(8)
+            VStack(spacing: 10) {
+                Image(systemName: "square.and.arrow.down.on.square")
+                    .font(.system(size: 38))
+                Text("Drop video or audio file to transcribe")
+                    .font(.headline)
+            }
+            .foregroundStyle(.tint)
+        }
+        .allowsHitTesting(false)
+        .ignoresSafeArea()
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard !model.isRunning,
+              let provider = providers.first(where: { $0.canLoadObject(ofClass: URL.self) })
+        else { return false }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let url, url.isFileURL else { return }
+            DispatchQueue.main.async { model.setVideo(url: url) }
+        }
+        return true
     }
 
     private var header: some View {
@@ -74,13 +113,21 @@ struct ContentView: View {
             }
             .disabled(model.isRunning)
 
-            Text(model.videoURL?.lastPathComponent ?? "No file selected")
+            Text(model.videoURL?.lastPathComponent ?? "No file selected — or drag a file here")
                 .font(.callout)
                 .foregroundStyle(model.videoURL == nil ? .secondary : .primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
 
             Spacer()
+
+            if model.canCancel {
+                Button(role: .cancel) {
+                    model.cancel()
+                } label: {
+                    Label("Cancel", systemImage: "stop.circle")
+                }
+            }
 
             Button {
                 model.start()
@@ -142,9 +189,21 @@ struct ContentView: View {
                 }
             }
         case .failed(let message):
-            Label(message, systemImage: "exclamationmark.triangle")
-                .font(.caption)
-                .foregroundStyle(.red)
+            HStack(alignment: .top, spacing: 10) {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                Spacer(minLength: 8)
+                if model.canRetry {
+                    Button {
+                        model.retry()
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                    }
+                    .controlSize(.small)
+                }
+            }
         default:
             EmptyView()
         }
@@ -157,6 +216,7 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .textSelection(.enabled)
             Spacer()
             Button {
                 model.saveSubtitle()

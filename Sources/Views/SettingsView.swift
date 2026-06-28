@@ -55,7 +55,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
 
                     TextField("Model", text: $settings.translationModel,
-                              prompt: Text("Qwen3.5-9B-MLX-8bit"))
+                              prompt: Text("qwen2.5-vl-32b-instruct"))
                         .textFieldStyle(.roundedBorder)
 
                     TextField("API key (optional)", text: $settings.translationApiKey,
@@ -72,8 +72,47 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            Section("Files") {
+                HStack {
+                    Text("Working folder")
+                    Spacer()
+                    Text(workingFolderDisplay)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                HStack {
+                    Button("Choose…") { chooseWorkingFolder() }
+                    if !settings.workingDirectory.isEmpty {
+                        Button("Use Default") { settings.workingDirectory = "" }
+                    }
+                }
+                Text("Where the extracted audio (WAV) is written during processing. Default is the same folder as the video file.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Keep extracted audio after finishing", isOn: $settings.keepExtractedAudio)
+            }
         }
         .formStyle(.grouped)
         .padding(.vertical, 8)
+    }
+
+    private var workingFolderDisplay: String {
+        settings.workingDirectory.isEmpty ? "Same folder as the video file" : settings.workingDirectory
+    }
+
+    private func chooseWorkingFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose a folder for extracted audio"
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.workingDirectory = url.path
+        }
     }
 }

@@ -110,6 +110,7 @@ struct AudioExtractor {
 
         var totalDataBytes = 0
         while reader.status == .reading {
+            try Task.checkCancellation()
             guard let sampleBuffer = readerOutput.copyNextSampleBuffer() else { break }
             defer { CMSampleBufferInvalidate(sampleBuffer) }
 
@@ -235,21 +236,27 @@ struct AudioExtractor {
             }
         }
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            process.terminationHandler = { proc in
-                handle.readabilityHandler = nil
-                if proc.terminationStatus == 0 {
-                    continuation.resume()
-                } else {
-                    let tail = state.tail()
-                    continuation.resume(throwing: AudioExtractorError.ffmpegFailed(tail))
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                process.terminationHandler = { proc in
+                    handle.readabilityHandler = nil
+                    if proc.terminationStatus == 0 {
+                        continuation.resume()
+                    } else {
+                        let tail = state.tail()
+                        continuation.resume(throwing: AudioExtractorError.ffmpegFailed(tail))
+                    }
+                }
+                do {
+                    try process.run()
+                } catch {
+                    handle.readabilityHandler = nil
+                    continuation.resume(throwing: AudioExtractorError.ffmpegFailed(error.localizedDescription))
                 }
             }
-            do {
-                try process.run()
-            } catch {
-                handle.readabilityHandler = nil
-                continuation.resume(throwing: AudioExtractorError.ffmpegFailed(error.localizedDescription))
+        } onCancel: {
+            if process.isRunning {
+                process.terminate()
             }
         }
         progress(1.0)
