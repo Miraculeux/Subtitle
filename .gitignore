@@ -1,0 +1,9 @@
+# Build output
+build/
+DerivedData/
+*.xcuserstate
+
+# XcodeGen output (regenerate with `xcodegen generate`)
+Subtitle.xcodeproj/
+
+.DS_Store
