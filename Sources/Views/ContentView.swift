@@ -87,18 +87,17 @@ struct ContentView: View {
             Text("Subtitles")
                 .font(.subheadline.weight(.semibold))
 
-            ScrollView {
-                TextEditor(text: $model.subtitleText)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 220)
-                    .scrollContentBackground(.hidden)
-            }
-            .background(Color(nsColor: .textBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color(nsColor: .separatorColor))
-            )
+            TextEditor(text: $model.subtitleText)
+                .font(.system(.body, design: .monospaced))
+                .frame(minHeight: 220, maxHeight: .infinity)
+                .scrollContentBackground(.hidden)
+                .padding(4)
+                .background(Color(nsColor: .textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color(nsColor: .separatorColor))
+                )
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
