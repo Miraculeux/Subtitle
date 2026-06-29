@@ -48,13 +48,13 @@ final class AppSettings: ObservableObject {
         apiKey = defaults.string(forKey: Keys.apiKey) ?? ""
         // Migrate the old "language" key to "sourceLanguage" if present.
         sourceLanguage = defaults.string(forKey: Keys.sourceLanguage)
-            ?? defaults.string(forKey: "language") ?? ""
+            ?? defaults.string(forKey: "language") ?? "en"
         let storedFormat = defaults.string(forKey: Keys.responseFormat) ?? ResponseFormat.srt.rawValue
         responseFormat = ResponseFormat(rawValue: storedFormat) ?? .srt
 
-        targetLanguage = defaults.string(forKey: Keys.targetLanguage) ?? ""
+        targetLanguage = defaults.string(forKey: Keys.targetLanguage) ?? "zh"
         translationServerURL = defaults.string(forKey: Keys.translationServerURL) ?? "http://127.0.0.1:1234"
-        translationModel = defaults.string(forKey: Keys.translationModel) ?? "qwen2.5-vl-32b-instruct"
+        translationModel = defaults.string(forKey: Keys.translationModel) ?? "gemma-4-26b-a4b"
         translationApiKey = defaults.string(forKey: Keys.translationApiKey) ?? ""
         bilingualOutput = defaults.object(forKey: Keys.bilingualOutput) as? Bool ?? false
         originalOnTop = defaults.object(forKey: Keys.originalOnTop) as? Bool ?? true

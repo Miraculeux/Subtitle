@@ -55,7 +55,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
 
                     TextField("Model", text: $settings.translationModel,
-                              prompt: Text("qwen2.5-vl-32b-instruct"))
+                              prompt: Text("gemma-4-26b-a4b"))
                         .textFieldStyle(.roundedBorder)
 
                     TextField("API key (optional)", text: $settings.translationApiKey,

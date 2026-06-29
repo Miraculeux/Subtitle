@@ -188,12 +188,12 @@ final class TranscriptionViewModel: ObservableObject {
                 }
 
                 stage = .finished
-                statusMessage = "Done. \(subtitleText.count) characters generated."
                 if settings.keepExtractedAudio, let wav = workingWAV {
-                    statusMessage += "  Audio kept: \(wav.path)"
                     workingWAV = nil // detach so it is not auto-deleted later
+                    autoSaveSubtitle(extraNote: "Audio kept: \(wav.path)")
                 } else {
                     cleanupWorkingWAV()
+                    autoSaveSubtitle(extraNote: nil)
                 }
                 rawTranscript = nil
                 resumeStep = nil
@@ -287,22 +287,63 @@ final class TranscriptionViewModel: ObservableObject {
         subtitleText = translated
     }
 
-    func saveSubtitle() {
-        guard !subtitleText.isEmpty else { return }
+    /// Automatically writes the finished subtitle next to the source file.
+    /// Falls back to a Save panel when the folder is not writable.
+    private func autoSaveSubtitle(extraNote: String?) {
+        guard !subtitleText.isEmpty else {
+            statusMessage = "Done, but no subtitles were produced."
+            return
+        }
+        let ext = settings?.responseFormat.fileExtension ?? "srt"
+
+        guard let videoURL else {
+            promptSaveSubtitle(defaultName: "subtitle.\(ext)", directory: nil)
+            return
+        }
+
+        let dir = videoURL.deletingLastPathComponent()
+        let base = videoURL.deletingPathExtension().lastPathComponent
+        let fm = FileManager.default
+
+        if fm.isWritableFile(atPath: dir.path) {
+            var target = dir.appendingPathComponent("\(base).\(ext)")
+            if fm.fileExists(atPath: target.path) {
+                target = dir.appendingPathComponent("\(base).\(timestampString()).\(ext)")
+            }
+            do {
+                try subtitleText.write(to: target, atomically: true, encoding: .utf8)
+                var message = "Saved: \(target.path)"
+                if let extraNote { message += "  •  \(extraNote)" }
+                statusMessage = message
+                return
+            } catch {
+                // Fall through to prompting the user for a destination.
+            }
+        }
+
+        promptSaveSubtitle(defaultName: "\(base).\(ext)", directory: dir)
+    }
+
+    private func timestampString() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date())
+    }
+
+    /// Shown only when the target folder is not writable or the write failed.
+    private func promptSaveSubtitle(defaultName: String, directory: URL?) {
         let ext = settings?.responseFormat.fileExtension ?? "srt"
         let panel = NSSavePanel()
         if let type = UTType(filenameExtension: ext) {
             panel.allowedContentTypes = [type]
         }
-        let baseName = videoURL?.deletingPathExtension().lastPathComponent ?? "subtitle"
-        panel.nameFieldStringValue = "\(baseName).\(ext)"
-        if let folder = videoURL?.deletingLastPathComponent() {
-            panel.directoryURL = folder
-        }
+        panel.nameFieldStringValue = defaultName
+        if let directory { panel.directoryURL = directory }
+        panel.message = "The default folder is not writable. Choose where to save the subtitles."
         if panel.runModal() == .OK, let url = panel.url {
             do {
                 try subtitleText.write(to: url, atomically: true, encoding: .utf8)
-                statusMessage = "Saved to \(url.lastPathComponent)"
+                statusMessage = "Saved: \(url.path)"
             } catch {
                 statusMessage = "Save failed: \(error.localizedDescription)"
             }

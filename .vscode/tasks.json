@@ -1,0 +1,30 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Generate Xcode project",
+      "type": "shell",
+      "command": "xcodegen generate",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Subtitle",
+      "type": "shell",
+      "command": "xcodebuild -project Subtitle.xcodeproj -scheme Subtitle -configuration Debug -derivedDataPath build CODE_SIGNING_ALLOWED=NO build",
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": ["Generate Xcode project"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Subtitle",
+      "type": "shell",
+      "command": "open build/Build/Products/Debug/Subtitle.app",
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": ["Build Subtitle"],
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    }
+  ]
+}

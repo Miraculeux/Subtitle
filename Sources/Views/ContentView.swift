@@ -218,12 +218,6 @@ struct ContentView: View {
                 .truncationMode(.middle)
                 .textSelection(.enabled)
             Spacer()
-            Button {
-                model.saveSubtitle()
-            } label: {
-                Label("Save…", systemImage: "square.and.arrow.down")
-            }
-            .disabled(model.subtitleText.isEmpty)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
