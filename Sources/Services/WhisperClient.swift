@@ -43,7 +43,11 @@ struct WhisperClient {
         let audioData = try Data(contentsOf: audioURL)
         var fields: [(String, String)] = [
             ("model", model),
-            ("response_format", responseFormat.rawValue)
+            ("response_format", responseFormat.rawValue),
+            // Deterministic decoding: fixed temperature with no random fallback,
+            // so repeated runs on the same file produce identical results.
+            ("temperature", "0"),
+            ("temperature_inc", "0")
         ]
         let trimmedLanguage = language.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedLanguage.isEmpty {

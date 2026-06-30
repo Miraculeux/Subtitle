@@ -19,6 +19,7 @@ final class AppSettings: ObservableObject {
     @Published var translationApiKey: String { didSet { defaults.set(translationApiKey, forKey: Keys.translationApiKey) } }
     @Published var bilingualOutput: Bool { didSet { defaults.set(bilingualOutput, forKey: Keys.bilingualOutput) } }
     @Published var originalOnTop: Bool { didSet { defaults.set(originalOnTop, forKey: Keys.originalOnTop) } }
+    @Published var disableThinking: Bool { didSet { defaults.set(disableThinking, forKey: Keys.disableThinking) } }
 
     // Files
     @Published var workingDirectory: String { didSet { defaults.set(workingDirectory, forKey: Keys.workingDirectory) } }
@@ -38,6 +39,7 @@ final class AppSettings: ObservableObject {
         static let translationApiKey = "translationApiKey"
         static let bilingualOutput = "bilingualOutput"
         static let originalOnTop = "originalOnTop"
+        static let disableThinking = "disableThinking"
         static let workingDirectory = "workingDirectory"
         static let keepExtractedAudio = "keepExtractedAudio"
     }
@@ -54,10 +56,11 @@ final class AppSettings: ObservableObject {
 
         targetLanguage = defaults.string(forKey: Keys.targetLanguage) ?? "zh"
         translationServerURL = defaults.string(forKey: Keys.translationServerURL) ?? "http://127.0.0.1:1234"
-        translationModel = defaults.string(forKey: Keys.translationModel) ?? "gemma-4-26b-a4b"
+        translationModel = defaults.string(forKey: Keys.translationModel) ?? "qwen3.5-9b-mlx"
         translationApiKey = defaults.string(forKey: Keys.translationApiKey) ?? ""
         bilingualOutput = defaults.object(forKey: Keys.bilingualOutput) as? Bool ?? false
         originalOnTop = defaults.object(forKey: Keys.originalOnTop) as? Bool ?? true
+        disableThinking = defaults.object(forKey: Keys.disableThinking) as? Bool ?? true
         workingDirectory = defaults.string(forKey: Keys.workingDirectory) ?? ""
         keepExtractedAudio = defaults.object(forKey: Keys.keepExtractedAudio) as? Bool ?? false
     }

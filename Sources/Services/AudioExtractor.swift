@@ -34,9 +34,9 @@ struct AudioExtractor {
     static let channels = 1
     static let bitsPerSample = 16
 
-    /// Extracts the audio track to a 16 kHz mono WAV. Tries AVFoundation first
-    /// (fast, native), and on failure transparently falls back to ffmpeg so
-    /// unsupported containers/codecs (MKV, WebM, HEVC, etc.) still work.
+    /// Extracts the audio track to a 16 kHz mono WAV. Prefers ffmpeg when it is
+    /// available (broadest container/codec support), and falls back to the
+    /// native AVFoundation path if ffmpeg is missing or fails.
     /// - Parameters:
     ///   - videoURL: Source media (video or audio) file.
     ///   - outputURL: Destination `.wav` file (overwritten if it exists).
@@ -44,15 +44,18 @@ struct AudioExtractor {
     static func extractWAV(from videoURL: URL,
                            to outputURL: URL,
                            progress: @escaping (Double) -> Void) async throws {
-        do {
-            try await extractWithAVFoundation(from: videoURL, to: outputURL, progress: progress)
-        } catch let avError {
-            // AVFoundation could not handle this file. Try ffmpeg if present.
-            guard let ffmpeg = findFFmpeg() else {
-                throw AudioExtractorError.unsupportedNoFFmpeg(avError.localizedDescription)
+        if let ffmpeg = findFFmpeg() {
+            do {
+                try await extractWithFFmpeg(ffmpeg: ffmpeg, from: videoURL, to: outputURL, progress: progress)
+                return
+            } catch {
+                if error is CancellationError { throw error }
+                // ffmpeg failed for this file; try the native decoder instead.
+                progress(0)
+                try await extractWithAVFoundation(from: videoURL, to: outputURL, progress: progress)
             }
-            progress(0)
-            try await extractWithFFmpeg(ffmpeg: ffmpeg, from: videoURL, to: outputURL, progress: progress)
+        } else {
+            try await extractWithAVFoundation(from: videoURL, to: outputURL, progress: progress)
         }
     }
 
@@ -180,6 +183,37 @@ struct AudioExtractor {
     }
 
     // MARK: - ffmpeg fallback
+
+    /// Returns true if the file is already a 16 kHz, mono, 16-bit PCM WAV — the
+    /// exact format Whisper expects — so extraction/transcoding can be skipped.
+    static func isReadyToUse(_ url: URL) -> Bool {
+        guard url.pathExtension.lowercased() == "wav" else { return false }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        guard let header = try? handle.read(upToCount: 44), header.count >= 44 else { return false }
+
+        func ascii(_ range: Range<Int>) -> String {
+            String(bytes: header[range], encoding: .ascii) ?? ""
+        }
+        func u16(_ offset: Int) -> Int { Int(header[offset]) | (Int(header[offset + 1]) << 8) }
+        func u32(_ offset: Int) -> Int {
+            Int(header[offset]) | (Int(header[offset + 1]) << 8)
+                | (Int(header[offset + 2]) << 16) | (Int(header[offset + 3]) << 24)
+        }
+
+        // Canonical PCM WAV layout: RIFF....WAVE / fmt  chunk at offset 12.
+        guard ascii(0..<4) == "RIFF", ascii(8..<12) == "WAVE", ascii(12..<16) == "fmt " else {
+            return false
+        }
+        let audioFormat = u16(20)   // 1 = PCM
+        let channels = u16(22)
+        let sampleRate = u32(24)
+        let bitsPerSample = u16(34)
+        return audioFormat == 1
+            && channels == AudioExtractor.channels
+            && sampleRate == AudioExtractor.sampleRate
+            && bitsPerSample == AudioExtractor.bitsPerSample
+    }
 
     /// Locates an ffmpeg executable in common install locations or on PATH.
     static func findFFmpeg() -> URL? {

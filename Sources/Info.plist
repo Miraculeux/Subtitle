@@ -14,7 +14,7 @@
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundleDisplayName</key>
 	<string>Subtitle</string>
-	<key>CFBundleIconName</key>
+	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>

@@ -35,6 +35,9 @@ struct SubtitleTranslator {
     let bilingual: Bool
     /// When `bilingual`, places the original line above the translation if true.
     let originalOnTop: Bool
+    /// When true, prefills an empty think block to suppress reasoning models'
+    /// chain-of-thought (huge speedup for models like qwen3.5).
+    let disableThinking: Bool
 
     private let batchSize = 25
 
@@ -133,13 +136,19 @@ struct SubtitleTranslator {
 
     /// Performs a chat-completions request and returns the assistant content.
     private func chat(system: String, user: String) async throws -> String {
+        var messages: [[String: Any]] = [
+            ["role": "system", "content": system],
+            ["role": "user", "content": user]
+        ]
+        if disableThinking {
+            // A pre-closed think block makes reasoning models skip thinking.
+            messages.append(["role": "assistant", "content": "<think>\n\n</think>\n\n"])
+        }
+
         let payload: [String: Any] = [
             "model": model,
             "temperature": 0,
-            "messages": [
-                ["role": "system", "content": system],
-                ["role": "user", "content": user]
-            ]
+            "messages": messages
         ]
 
         var request = URLRequest(url: endpoint)

@@ -8,7 +8,7 @@ size required by an .appiconset, plus a Contents.json.
 import json
 import math
 import os
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 OUT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -41,10 +41,26 @@ def make_master():
         for x in range(BASE):
             gd[x, y] = (c[0], c[1], c[2], 255)
 
-    # Squircle with margin so it reads as a native macOS icon.
-    margin = int(BASE * 0.085)
+    # Classic macOS app-icon geometry: a rounded squircle on a transparent
+    # canvas with the standard ~8.6% margin, plus a soft drop shadow. This is
+    # what well-behaved macOS icons use and it renders correctly (no system
+    # tile/border) on macOS Tahoe.
+    margin = int(BASE * 0.086)
     inner = BASE - 2 * margin
-    radius = int(inner * 0.235)
+    radius = int(inner * 0.225)
+
+    # Drop shadow: a blurred dark rounded rect, offset slightly downward.
+    shadow = Image.new("RGBA", (BASE, BASE), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    offset = int(BASE * 0.012)
+    sd.rounded_rectangle(
+        [margin, margin + offset, margin + inner, margin + inner + offset],
+        radius=radius, fill=(0, 0, 0, 120),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(BASE * 0.02))
+    img = Image.alpha_composite(img, shadow)
+
+    # Gradient squircle on top.
     mask = rounded_mask(inner, radius)
     panel = grad.crop((0, 0, inner, inner))
     img.paste(panel, (margin, margin), mask)
@@ -86,36 +102,37 @@ def make_master():
 
 
 def main():
-    os.makedirs(OUT_DIR, exist_ok=True)
     master = make_master()
+    build_icns(master)
 
-    # (size_pt, scale)
-    specs = [
-        (16, 1), (16, 2),
-        (32, 1), (32, 2),
-        (128, 1), (128, 2),
-        (256, 1), (256, 2),
-        (512, 1), (512, 2),
+
+def build_icns(master):
+    """Builds a full-size AppIcon.icns (up to 1024) via iconutil.
+
+    macOS Tahoe renders a standalone .icns (CFBundleIconFile) edge-to-edge,
+    whereas an asset-catalog app icon gets wrapped in a system platter. So the
+    app ships this .icns rather than an asset-catalog AppIcon.
+    """
+    import subprocess
+    import tempfile
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    icns_path = os.path.join(project_root, "Sources", "AppIcon.icns")
+
+    pairs = [
+        ("icon_16x16.png", 16), ("icon_16x16@2x.png", 32),
+        ("icon_32x32.png", 32), ("icon_32x32@2x.png", 64),
+        ("icon_128x128.png", 128), ("icon_128x128@2x.png", 256),
+        ("icon_256x256.png", 256), ("icon_256x256@2x.png", 512),
+        ("icon_512x512.png", 512), ("icon_512x512@2x.png", 1024),
     ]
-
-    images = []
-    for pt, scale in specs:
-        px = pt * scale
-        filename = f"icon_{pt}x{pt}@{scale}x.png"
-        resized = master.resize((px, px), Image.LANCZOS)
-        resized.save(os.path.join(OUT_DIR, filename))
-        images.append({
-            "size": f"{pt}x{pt}",
-            "idiom": "mac",
-            "filename": filename,
-            "scale": f"{scale}x",
-        })
-
-    contents = {"images": images, "info": {"version": 1, "author": "xcode"}}
-    with open(os.path.join(OUT_DIR, "Contents.json"), "w") as f:
-        json.dump(contents, f, indent=2)
-
-    print(f"Wrote {len(images)} icons + Contents.json to {OUT_DIR}")
+    with tempfile.TemporaryDirectory() as tmp:
+        iconset = os.path.join(tmp, "AppIcon.iconset")
+        os.makedirs(iconset)
+        for filename, px in pairs:
+            master.resize((px, px), Image.LANCZOS).save(os.path.join(iconset, filename))
+        subprocess.run(["iconutil", "-c", "icns", iconset, "-o", icns_path], check=True)
+    print(f"Wrote AppIcon.icns to {icns_path}")
 
 
 if __name__ == "__main__":

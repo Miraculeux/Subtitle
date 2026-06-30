@@ -158,6 +158,11 @@ struct ContentView: View {
             }
             .frame(maxWidth: 220)
 
+            if settings.translationEnabled {
+                Toggle("Bilingual", isOn: $settings.bilingualOutput)
+                    .toggleStyle(.checkbox)
+            }
+
             Spacer()
         }
         .disabled(model.isRunning)

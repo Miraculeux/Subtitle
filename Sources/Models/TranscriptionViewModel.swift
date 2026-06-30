@@ -42,6 +42,9 @@ final class TranscriptionViewModel: ObservableObject {
 
     /// Intermediate artifacts kept so a retry can resume mid-pipeline.
     private var workingWAV: URL?
+    /// True when `workingWAV` points at the user's original file (already in the
+    /// target format) and therefore must never be deleted.
+    private var workingWAVIsExternal = false
     private var rawTranscript: String?
     private var resumeStep: Step?
     private var currentTask: Task<Void, Never>?
@@ -125,10 +128,11 @@ final class TranscriptionViewModel: ObservableObject {
     }
 
     private func cleanupWorkingWAV() {
-        if let wav = workingWAV {
+        if let wav = workingWAV, !workingWAVIsExternal {
             try? FileManager.default.removeItem(at: wav)
-            workingWAV = nil
         }
+        workingWAV = nil
+        workingWAVIsExternal = false
     }
 
     func start() {
@@ -188,7 +192,7 @@ final class TranscriptionViewModel: ObservableObject {
                 }
 
                 stage = .finished
-                if settings.keepExtractedAudio, let wav = workingWAV {
+                if settings.keepExtractedAudio, !workingWAVIsExternal, let wav = workingWAV {
                     workingWAV = nil // detach so it is not auto-deleted later
                     autoSaveSubtitle(extraNote: "Audio kept: \(wav.path)")
                 } else {
@@ -221,6 +225,16 @@ final class TranscriptionViewModel: ObservableObject {
     }
 
     private func runExtract(videoURL: URL) async throws {
+        // Fast path: the input is already a 16 kHz mono WAV — use it directly,
+        // skipping any extraction/transcoding (and never delete the original).
+        if AudioExtractor.isReadyToUse(videoURL) {
+            cleanupWorkingWAV()
+            workingWAV = videoURL
+            workingWAVIsExternal = true
+            extractionProgress = 1.0
+            return
+        }
+
         let directory = workingDirectory(for: videoURL)
         let wav = directory.appendingPathComponent("subtitle-\(UUID().uuidString).wav")
         try await AudioExtractor.extractWAV(from: videoURL, to: wav) { [weak self] value in
@@ -228,6 +242,7 @@ final class TranscriptionViewModel: ObservableObject {
         }
         cleanupWorkingWAV()
         workingWAV = wav
+        workingWAVIsExternal = false
     }
 
     /// Resolves where to write the extracted audio. Uses an explicitly
@@ -275,7 +290,8 @@ final class TranscriptionViewModel: ObservableObject {
                                             targetLanguage: target,
                                             sourceLanguage: source,
                                             bilingual: settings.bilingualOutput,
-                                            originalOnTop: settings.originalOnTop)
+                                            originalOnTop: settings.originalOnTop,
+                                            disableThinking: settings.disableThinking)
 
         stage = .translating
         translationProgress = 0

@@ -55,12 +55,17 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
 
                     TextField("Model", text: $settings.translationModel,
-                              prompt: Text("gemma-4-26b-a4b"))
+                              prompt: Text("qwen3.5-9b-mlx"))
                         .textFieldStyle(.roundedBorder)
 
                     TextField("API key (optional)", text: $settings.translationApiKey,
                               prompt: Text("Leave empty for local servers"))
                         .textFieldStyle(.roundedBorder)
+
+                    Toggle("Disable model thinking (faster for reasoning models)", isOn: $settings.disableThinking)
+                    Text("Prefills an empty think block so reasoning models (e.g. qwen3.5) skip chain-of-thought. Leave off for normal instruct models.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
                     Toggle("Bilingual subtitles (original + translation)", isOn: $settings.bilingualOutput)
 
