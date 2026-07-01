@@ -29,47 +29,25 @@ def rounded_mask(size, radius):
 
 
 def make_master():
-    img = Image.new("RGBA", (BASE, BASE), (0, 0, 0, 0))
-
-    # Vertical gradient background (indigo -> violet).
+    # Vertical gradient background (indigo -> violet), full-bleed.
     top = (88, 86, 214)      # systemIndigo-ish
     bottom = (148, 85, 211)  # violet
-    grad = Image.new("RGBA", (BASE, BASE), (0, 0, 0, 255))
-    gd = grad.load()
+    img = Image.new("RGBA", (BASE, BASE), (0, 0, 0, 255))
+    gd = img.load()
     for y in range(BASE):
         c = lerp(top, bottom, y / (BASE - 1))
         for x in range(BASE):
             gd[x, y] = (c[0], c[1], c[2], 255)
 
-    # Classic macOS app-icon geometry: a rounded squircle on a transparent
-    # canvas with the standard ~8.6% margin, plus a soft drop shadow. This is
-    # what well-behaved macOS icons use and it renders correctly (no system
-    # tile/border) on macOS Tahoe.
-    margin = int(BASE * 0.086)
-    inner = BASE - 2 * margin
-    radius = int(inner * 0.225)
-
-    # Drop shadow: a blurred dark rounded rect, offset slightly downward.
-    shadow = Image.new("RGBA", (BASE, BASE), (0, 0, 0, 0))
-    sd = ImageDraw.Draw(shadow)
-    offset = int(BASE * 0.012)
-    sd.rounded_rectangle(
-        [margin, margin + offset, margin + inner, margin + inner + offset],
-        radius=radius, fill=(0, 0, 0, 120),
-    )
-    shadow = shadow.filter(ImageFilter.GaussianBlur(BASE * 0.02))
-    img = Image.alpha_composite(img, shadow)
-
-    # Gradient squircle on top.
-    mask = rounded_mask(inner, radius)
-    panel = grad.crop((0, 0, inner, inner))
-    img.paste(panel, (margin, margin), mask)
-
+    # macOS Tahoe masks the icon to a rounded rect and adds its own shadow, so
+    # the artwork must FILL the whole canvas (no margin, no own rounding/shadow).
+    # Glyphs are laid out inside a safe inset so the corner mask never clips them.
     draw = ImageDraw.Draw(img)
+    inner = int(BASE * 0.74)  # safe area for foreground glyphs
 
     # Centered audio waveform (rounded vertical bars).
     cx = BASE // 2
-    cy = int(BASE * 0.44)
+    cy = int(BASE * 0.42)
     bar_w = int(inner * 0.052)
     gap = int(bar_w * 0.85)
     heights = [0.26, 0.5, 0.78, 1.0, 0.62, 0.86, 0.4, 0.2]
@@ -87,9 +65,9 @@ def make_master():
         )
         x += bar_w + gap
 
-    # Two subtitle bars near the bottom ("CC" feel).
-    sub_y = int(BASE * 0.74)
-    sub_h = int(inner * 0.072)
+    # Two subtitle bars below the waveform ("CC" feel).
+    sub_y = int(BASE * 0.66)
+    sub_h = int(inner * 0.075)
     left = cx - int(inner * 0.34)
     right = cx + int(inner * 0.34)
     translucent = (255, 255, 255, 235)

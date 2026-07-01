@@ -30,6 +30,7 @@ final class TranscriptionViewModel: ObservableObject {
     @Published var videoURL: URL?
     @Published var stage: Stage = .idle
     @Published var extractionProgress: Double = 0
+    @Published var transcriptionProgress: Double = 0
     @Published var translationProgress: Double = 0
     @Published var subtitleText: String = ""
     @Published var statusMessage: String = "Select a video file to begin."
@@ -60,6 +61,43 @@ final class TranscriptionViewModel: ObservableObject {
     }
 
     var canCancel: Bool { isRunning }
+
+    /// Which pipeline step is currently executing, if any.
+    var activeStep: Step? {
+        switch stage {
+        case .extractingAudio: return .extract
+        case .transcribing: return .transcribe
+        case .translating: return .translate
+        default: return nil
+        }
+    }
+
+    var hasAudio: Bool { workingWAV != nil }
+    var hasTranscript: Bool { rawTranscript != nil }
+
+    /// Whether the user may (re)start the pipeline from a given step.
+    func canRun(_ step: Step) -> Bool {
+        guard videoURL != nil, !isRunning else { return false }
+        switch step {
+        case .extract:   return true
+        case .transcribe: return true // reuses existing audio, else extracts first
+        case .translate:  return settings?.translationEnabled ?? false
+        }
+    }
+
+    /// Marks a step as already completed (for the UI status indicator).
+    func isStepDone(_ step: Step) -> Bool {
+        switch step {
+        case .extract:   return hasAudio
+        case .transcribe: return hasTranscript
+        case .translate:  return stage == .finished && (settings?.translationEnabled ?? false)
+        }
+    }
+
+    /// Runs the pipeline starting at the chosen step, reusing prior artifacts.
+    func runFrom(_ step: Step) {
+        run(from: step)
+    }
 
     /// Requests cancellation of the in-progress pipeline.
     func cancel() {
@@ -192,14 +230,12 @@ final class TranscriptionViewModel: ObservableObject {
                 }
 
                 stage = .finished
-                if settings.keepExtractedAudio, !workingWAVIsExternal, let wav = workingWAV {
-                    workingWAV = nil // detach so it is not auto-deleted later
-                    autoSaveSubtitle(extraNote: "Audio kept: \(wav.path)")
-                } else {
-                    cleanupWorkingWAV()
-                    autoSaveSubtitle(extraNote: nil)
-                }
-                rawTranscript = nil
+                // Keep the extracted audio and transcript so the user can
+                // re-run any single step (e.g. just re-translate) without
+                // redoing earlier work. Artifacts are cleared on new file.
+                let audioNote = (settings.keepExtractedAudio && !workingWAVIsExternal)
+                    ? workingWAV.map { "Audio: \($0.path)" } : nil
+                autoSaveSubtitle(extraNote: audioNote)
                 resumeStep = nil
             } catch {
                 resumeStep = failedAt
@@ -269,7 +305,10 @@ final class TranscriptionViewModel: ObservableObject {
                                    language: settings.sourceLanguage,
                                    apiKey: settings.apiKey,
                                    responseFormat: settings.responseFormat)
-        let result = try await client.transcribe(audioURL: wav)
+        transcriptionProgress = 0
+        let result = try await client.transcribeChunked(audioURL: wav) { [weak self] value in
+            Task { @MainActor in self?.transcriptionProgress = value }
+        }
         rawTranscript = result
         subtitleText = result // show the transcript immediately
     }

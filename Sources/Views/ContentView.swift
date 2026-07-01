@@ -82,6 +82,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 14) {
             filePicker
             languageBar
+            stepsBar
             progressSection
 
             Text("Subtitles")
@@ -138,6 +139,45 @@ struct ContentView: View {
         }
     }
 
+    private var stepsBar: some View {
+        HStack(spacing: 8) {
+            stepButton(.extract, title: "1 · Extract", icon: "waveform")
+            stepArrow
+            stepButton(.transcribe, title: "2 · Transcribe", icon: "text.viewfinder")
+            stepArrow
+            stepButton(.translate, title: "3 · Translate", icon: "character.bubble")
+        }
+    }
+
+    private var stepArrow: some View {
+        Image(systemName: "chevron.right")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func stepButton(_ step: TranscriptionViewModel.Step, title: String, icon: String) -> some View {
+        Button {
+            model.runFrom(step)
+        } label: {
+            HStack(spacing: 6) {
+                if model.activeStep == step {
+                    ProgressView().controlSize(.small)
+                } else if model.isStepDone(step) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Image(systemName: icon)
+                }
+                Text(title).font(.callout)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
+        }
+        .disabled(!model.canRun(step))
+        .help("Run starting from this step (reuses earlier results)")
+    }
+
     private var languageBar: some View {
         HStack(spacing: 12) {
             Picker("Source", selection: $settings.sourceLanguage) {
@@ -179,11 +219,11 @@ struct ContentView: View {
                 }
             }
         case .transcribing:
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Transcribing with Whisper…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                ProgressView(value: model.transcriptionProgress) {
+                    Text("Transcribing with Whisper… \(Int(model.transcriptionProgress * 100))%")
+                        .font(.caption)
+                }
             }
         case .translating:
             VStack(alignment: .leading, spacing: 4) {
@@ -193,21 +233,10 @@ struct ContentView: View {
                 }
             }
         case .failed(let message):
-            HStack(alignment: .top, spacing: 10) {
-                Label(message, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .textSelection(.enabled)
-                Spacer(minLength: 8)
-                if model.canRetry {
-                    Button {
-                        model.retry()
-                    } label: {
-                        Label("Retry", systemImage: "arrow.clockwise")
-                    }
-                    .controlSize(.small)
-                }
-            }
+            Label(message, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
         default:
             EmptyView()
         }

@@ -44,10 +44,10 @@ struct WhisperClient {
         var fields: [(String, String)] = [
             ("model", model),
             ("response_format", responseFormat.rawValue),
-            // Deterministic decoding: fixed temperature with no random fallback,
-            // so repeated runs on the same file produce identical results.
-            ("temperature", "0"),
-            ("temperature_inc", "0")
+            // Start greedy at temperature 0, but allow Whisper's temperature
+            // fallback to recover failed/garbled segments (fewer repetition
+            // loops and giant-duration cues, at the cost of exact reproducibility).
+            ("temperature", "0")
         ]
         let trimmedLanguage = language.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedLanguage.isEmpty {
