@@ -20,7 +20,7 @@ struct ContentView: View {
             handleDrop(providers)
         }
         .overlay {
-            if isDropTargeted && !model.isRunning {
+            if isDropTargeted {
                 dropOverlay
             }
         }
@@ -45,7 +45,6 @@ struct ContentView: View {
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard !model.isRunning else { return false }
         let fileProviders = providers.filter { $0.canLoadObject(ofClass: URL.self) }
         guard !fileProviders.isEmpty else { return false }
         for provider in fileProviders {
@@ -114,7 +113,6 @@ struct ContentView: View {
             } label: {
                 Label("Add Files…", systemImage: "plus")
             }
-            .disabled(model.isRunning)
 
             Text(model.queue.isEmpty ? "No files queued — or drag files here" : "\(model.queue.count) file\(model.queue.count == 1 ? "" : "s") queued")
                 .font(.callout)
@@ -148,6 +146,15 @@ struct ContentView: View {
                 Text("Queue")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
+                Button {
+                    model.clearCompletedQueueItems()
+                } label: {
+                    Image(systemName: "checkmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .disabled(!model.hasCompletedQueueItems)
+                .help("Clear completed")
+
                 Button(role: .destructive) {
                     model.clearQueue()
                 } label: {

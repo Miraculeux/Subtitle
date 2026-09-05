@@ -155,6 +155,13 @@ final class TranscriptionViewModel: ObservableObject {
         !queue.isEmpty && !isRunning
     }
 
+    var hasCompletedQueueItems: Bool {
+        queue.contains { item in
+            if case .completed = item.status { return true }
+            return false
+        }
+    }
+
     func selectVideo() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
@@ -183,7 +190,6 @@ final class TranscriptionViewModel: ObservableObject {
     }
 
     func addFiles(_ urls: [URL]) {
-        guard !isRunning else { return }
         var knownPaths = Set(queue.map { $0.url.standardizedFileURL.path })
         let additions = urls.filter { url in
             let path = url.standardizedFileURL.path
@@ -195,7 +201,9 @@ final class TranscriptionViewModel: ObservableObject {
         if videoURL == nil, let first = queue.first {
             prepareVideo(first.url)
         }
-        statusMessage = "Queue ready: \(queue.count) file\(queue.count == 1 ? "" : "s")."
+        if !isRunning {
+            statusMessage = "Queue ready: \(queue.count) file\(queue.count == 1 ? "" : "s")."
+        }
     }
 
     func removeFromQueue(id: UUID) {
@@ -222,6 +230,20 @@ final class TranscriptionViewModel: ObservableObject {
         queue.removeAll()
         resetCurrentVideo()
         statusMessage = "Select video or audio files to begin."
+    }
+
+    func clearCompletedQueueItems() {
+        queue.removeAll { item in
+            if case .completed = item.status { return true }
+            return false
+        }
+        if !isRunning, let videoURL, !queue.contains(where: { $0.url == videoURL }) {
+            if let first = queue.first {
+                prepareVideo(first.url)
+            } else {
+                resetCurrentVideo()
+            }
+        }
     }
 
     private func prepareVideo(_ url: URL) {
