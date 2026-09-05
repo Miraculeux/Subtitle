@@ -24,6 +24,11 @@ final class TranscriptionViewModel: ObservableObject {
             case processing
             case completed
             case failed(String)
+
+            var isProcessing: Bool {
+                if case .processing = self { return true }
+                return false
+            }
         }
 
         let id = UUID()
@@ -194,7 +199,8 @@ final class TranscriptionViewModel: ObservableObject {
     }
 
     func removeFromQueue(id: UUID) {
-        guard !isRunning, let index = queue.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = queue.firstIndex(where: { $0.id == id }),
+              !queue[index].status.isProcessing else { return }
         let removedCurrent = queue[index].url == videoURL
         queue.remove(at: index)
         if removedCurrent {
@@ -205,6 +211,10 @@ final class TranscriptionViewModel: ObservableObject {
             }
         }
         statusMessage = queue.isEmpty ? "Select video or audio files to begin." : "Queue ready: \(queue.count) file\(queue.count == 1 ? "" : "s")."
+    }
+
+    func canRemoveFromQueue(id: UUID) -> Bool {
+        queue.first(where: { $0.id == id }).map { !$0.status.isProcessing } ?? false
     }
 
     func clearQueue() {
@@ -267,6 +277,7 @@ final class TranscriptionViewModel: ObservableObject {
             return false
         }) else {
             isQueueRunning = false
+            endPreventSleep()
             let completed = queue.filter {
                 if case .completed = $0.status { return true }
                 return false
@@ -301,7 +312,11 @@ final class TranscriptionViewModel: ObservableObject {
         beginPreventSleep()
 
         currentTask = Task {
-            defer { endPreventSleep() }
+            defer {
+                if queueItemID == nil || !isQueueRunning {
+                    endPreventSleep()
+                }
+            }
             var failedAt: Step = step
             do {
                 if step == .extract {

@@ -173,10 +173,12 @@ struct ContentView: View {
                                 model.removeFromQueue(id: item.id)
                             } label: {
                                 Image(systemName: "xmark.circle")
+                                    .frame(width: 24, height: 24)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.borderless)
-                            .disabled(model.isRunning)
-                            .help("Remove from queue")
+                            .disabled(!model.canRemoveFromQueue(id: item.id))
+                            .help(item.status.isProcessing ? "The current file cannot be removed" : "Remove from queue")
                         }
                         .padding(.horizontal, 8)
                         .frame(height: 32)
