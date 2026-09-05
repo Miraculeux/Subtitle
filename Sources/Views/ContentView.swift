@@ -35,7 +35,7 @@ struct ContentView: View {
             VStack(spacing: 10) {
                 Image(systemName: "square.and.arrow.down.on.square")
                     .font(.system(size: 38))
-                Text("Drop video or audio file to transcribe")
+                Text("Drop video or audio files to add to the queue")
                     .font(.headline)
             }
             .foregroundStyle(.tint)
@@ -45,12 +45,14 @@ struct ContentView: View {
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard !model.isRunning,
-              let provider = providers.first(where: { $0.canLoadObject(ofClass: URL.self) })
-        else { return false }
-        _ = provider.loadObject(ofClass: URL.self) { url, _ in
-            guard let url, url.isFileURL else { return }
-            DispatchQueue.main.async { model.setVideo(url: url) }
+        guard !model.isRunning else { return false }
+        let fileProviders = providers.filter { $0.canLoadObject(ofClass: URL.self) }
+        guard !fileProviders.isEmpty else { return false }
+        for provider in fileProviders {
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url, url.isFileURL else { return }
+                DispatchQueue.main.async { model.setVideo(url: url) }
+            }
         }
         return true
     }
@@ -81,6 +83,7 @@ struct ContentView: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 14) {
             filePicker
+            queueSection
             languageBar
             stepsBar
             progressSection
@@ -109,13 +112,13 @@ struct ContentView: View {
             Button {
                 model.selectVideo()
             } label: {
-                Label("Choose Video…", systemImage: "film")
+                Label("Add Files…", systemImage: "plus")
             }
             .disabled(model.isRunning)
 
-            Text(model.videoURL?.lastPathComponent ?? "No file selected — or drag a file here")
+            Text(model.queue.isEmpty ? "No files queued — or drag files here" : "\(model.queue.count) file\(model.queue.count == 1 ? "" : "s") queued")
                 .font(.callout)
-                .foregroundStyle(model.videoURL == nil ? .secondary : .primary)
+                .foregroundStyle(model.queue.isEmpty ? .secondary : .primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
 
@@ -132,10 +135,84 @@ struct ContentView: View {
             Button {
                 model.start()
             } label: {
-                Label("Generate", systemImage: "waveform")
+                Label("Generate All", systemImage: "waveform")
             }
             .buttonStyle(.borderedProminent)
             .disabled(!model.canStart)
+        }
+    }
+
+    private var queueSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Queue")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button(role: .destructive) {
+                    model.clearQueue()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.queue.isEmpty || model.isRunning)
+                .help("Clear queue")
+            }
+
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(model.queue) { item in
+                        HStack(spacing: 8) {
+                            queueStatusIcon(item.status)
+                                .frame(width: 16)
+                            Text(item.url.lastPathComponent)
+                                .font(.callout)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                            Button(role: .destructive) {
+                                model.removeFromQueue(id: item.id)
+                            } label: {
+                                Image(systemName: "xmark.circle")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(model.isRunning)
+                            .help("Remove from queue")
+                        }
+                        .padding(.horizontal, 8)
+                        .frame(height: 32)
+
+                        if item.id != model.queue.last?.id {
+                            Divider().padding(.leading, 32)
+                        }
+                    }
+                }
+            }
+            .frame(height: min(max(CGFloat(model.queue.count) * 32, 40), 128))
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color(nsColor: .separatorColor))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func queueStatusIcon(_ status: TranscriptionViewModel.QueueItem.Status) -> some View {
+        switch status {
+        case .pending:
+            Image(systemName: "clock")
+                .foregroundStyle(.secondary)
+        case .processing:
+            ProgressView()
+                .controlSize(.small)
+        case .completed:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .failed(let message):
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(.red)
+                .help(message)
         }
     }
 

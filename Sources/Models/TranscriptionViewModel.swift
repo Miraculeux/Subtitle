@@ -18,6 +18,19 @@ enum PipelineError: LocalizedError {
 
 @MainActor
 final class TranscriptionViewModel: ObservableObject {
+    struct QueueItem: Identifiable {
+        enum Status {
+            case pending
+            case processing
+            case completed
+            case failed(String)
+        }
+
+        let id = UUID()
+        let url: URL
+        var status: Status = .pending
+    }
+
     enum Stage: Equatable {
         case idle
         case extractingAudio
@@ -34,6 +47,8 @@ final class TranscriptionViewModel: ObservableObject {
     @Published var translationProgress: Double = 0
     @Published var subtitleText: String = ""
     @Published var statusMessage: String = "Select a video file to begin."
+    @Published private(set) var queue: [QueueItem] = []
+    @Published private(set) var isQueueRunning = false
 
     private var settings: AppSettings?
     private var sleepAssertion: NSObjectProtocol?
@@ -96,12 +111,14 @@ final class TranscriptionViewModel: ObservableObject {
 
     /// Runs the pipeline starting at the chosen step, reusing prior artifacts.
     func runFrom(_ step: Step) {
+        isQueueRunning = false
         run(from: step)
     }
 
     /// Requests cancellation of the in-progress pipeline.
     func cancel() {
         guard isRunning else { return }
+        isQueueRunning = false
         statusMessage = "Cancelling…"
         currentTask?.cancel()
     }
@@ -122,6 +139,7 @@ final class TranscriptionViewModel: ObservableObject {
     }
 
     var isRunning: Bool {
+        if isQueueRunning { return true }
         switch stage {
         case .extractingAudio, .transcribing, .translating: return true
         default: return false
@@ -129,12 +147,12 @@ final class TranscriptionViewModel: ObservableObject {
     }
 
     var canStart: Bool {
-        videoURL != nil && !isRunning
+        !queue.isEmpty && !isRunning
     }
 
     func selectVideo() {
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
 
@@ -148,14 +166,55 @@ final class TranscriptionViewModel: ObservableObject {
         }
         panel.allowedContentTypes = types
         panel.allowsOtherFileTypes = true
-        panel.message = "Choose a video or audio file to transcribe"
-        if panel.runModal() == .OK, let url = panel.url {
-            setVideo(url: url)
+        panel.message = "Choose video or audio files to add to the queue"
+        if panel.runModal() == .OK {
+            addFiles(panel.urls)
         }
     }
 
-    /// Accepts a file from the open panel or a drag-and-drop operation.
+    /// Adds one file from a drag-and-drop operation.
     func setVideo(url: URL) {
+        addFiles([url])
+    }
+
+    func addFiles(_ urls: [URL]) {
+        guard !isRunning else { return }
+        var knownPaths = Set(queue.map { $0.url.standardizedFileURL.path })
+        let additions = urls.filter { url in
+            let path = url.standardizedFileURL.path
+            return url.isFileURL && knownPaths.insert(path).inserted
+        }
+        guard !additions.isEmpty else { return }
+
+        queue.append(contentsOf: additions.map { QueueItem(url: $0) })
+        if videoURL == nil, let first = queue.first {
+            prepareVideo(first.url)
+        }
+        statusMessage = "Queue ready: \(queue.count) file\(queue.count == 1 ? "" : "s")."
+    }
+
+    func removeFromQueue(id: UUID) {
+        guard !isRunning, let index = queue.firstIndex(where: { $0.id == id }) else { return }
+        let removedCurrent = queue[index].url == videoURL
+        queue.remove(at: index)
+        if removedCurrent {
+            if let first = queue.first {
+                prepareVideo(first.url)
+            } else {
+                resetCurrentVideo()
+            }
+        }
+        statusMessage = queue.isEmpty ? "Select video or audio files to begin." : "Queue ready: \(queue.count) file\(queue.count == 1 ? "" : "s")."
+    }
+
+    func clearQueue() {
+        guard !isRunning else { return }
+        queue.removeAll()
+        resetCurrentVideo()
+        statusMessage = "Select video or audio files to begin."
+    }
+
+    private func prepareVideo(_ url: URL) {
         cleanupWorkingWAV()
         rawTranscript = nil
         resumeStep = nil
@@ -163,6 +222,15 @@ final class TranscriptionViewModel: ObservableObject {
         subtitleText = ""
         stage = .idle
         statusMessage = "Ready: \(url.lastPathComponent)"
+    }
+
+    private func resetCurrentVideo() {
+        cleanupWorkingWAV()
+        rawTranscript = nil
+        resumeStep = nil
+        videoURL = nil
+        subtitleText = ""
+        stage = .idle
     }
 
     private func cleanupWorkingWAV() {
@@ -174,7 +242,17 @@ final class TranscriptionViewModel: ObservableObject {
     }
 
     func start() {
-        run(from: .extract)
+        guard !queue.isEmpty, !isRunning else { return }
+        guard settings?.transcriptionEndpoint != nil else {
+            stage = .failed("Invalid server address. Check Settings.")
+            statusMessage = "Invalid server address."
+            return
+        }
+        for index in queue.indices {
+            queue[index].status = .pending
+        }
+        isQueueRunning = true
+        runNextQueuedFile()
     }
 
     /// Retries from the step that failed, reusing already-completed work.
@@ -182,7 +260,30 @@ final class TranscriptionViewModel: ObservableObject {
         run(from: resumeStep ?? .extract)
     }
 
-    private func run(from requestedStep: Step) {
+    private func runNextQueuedFile() {
+        guard isQueueRunning else { return }
+        guard let index = queue.firstIndex(where: {
+            if case .pending = $0.status { return true }
+            return false
+        }) else {
+            isQueueRunning = false
+            let completed = queue.filter {
+                if case .completed = $0.status { return true }
+                return false
+            }.count
+            let failed = queue.count - completed
+            stage = failed == 0 ? .finished : .failed("\(failed) file\(failed == 1 ? "" : "s") failed")
+            statusMessage = "Queue finished: \(completed) completed, \(failed) failed."
+            return
+        }
+
+        let item = queue[index]
+        queue[index].status = .processing
+        prepareVideo(item.url)
+        run(from: .extract, queueItemID: item.id)
+    }
+
+    private func run(from requestedStep: Step, queueItemID: UUID? = nil) {
         guard let videoURL, let settings else { return }
         guard settings.transcriptionEndpoint != nil else {
             stage = .failed("Invalid server address. Check Settings.")
@@ -249,6 +350,15 @@ final class TranscriptionViewModel: ObservableObject {
                 }
             }
             currentTask = nil
+            if let queueItemID,
+               let index = queue.firstIndex(where: { $0.id == queueItemID }) {
+                if case .finished = stage {
+                    queue[index].status = .completed
+                } else if case .failed(let message) = stage {
+                    queue[index].status = .failed(message)
+                }
+                runNextQueuedFile()
+            }
         }
     }
 

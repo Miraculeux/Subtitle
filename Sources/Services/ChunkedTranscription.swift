@@ -162,6 +162,47 @@ enum SubtitleCodec {
             return out
         }
     }
+
+    /// Collapses repetition produced within a segment or at adjacent segment
+    /// boundaries while preserving the first segment's original formatting.
+    static func removingAdjacentDuplicates(_ cues: [TimedCue]) -> [TimedCue] {
+        var result: [TimedCue] = []
+
+        for var cue in cues {
+            cue.text = removingRepeatedLines(from: cue.text)
+            let key = comparisonKey(for: cue.text)
+            guard !key.isEmpty else { continue }
+
+            if let previous = result.last,
+               comparisonKey(for: previous.text) == key,
+               cue.start <= previous.end + 1.0 {
+                result[result.count - 1].end = max(previous.end, cue.end)
+            } else {
+                result.append(cue)
+            }
+        }
+
+        return result
+    }
+
+    private static func removingRepeatedLines(from text: String) -> String {
+        var result: [String] = []
+        for line in text.components(separatedBy: .newlines) {
+            let key = comparisonKey(for: line)
+            if key.isEmpty || result.last.map({ comparisonKey(for: $0) }) != key {
+                result.append(line)
+            }
+        }
+        return result.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func comparisonKey(for text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .unicodeScalars
+            .filter { CharacterSet.alphanumerics.contains($0) }
+            .map(String.init)
+            .joined()
+    }
 }
 
 extension WhisperClient {
@@ -201,6 +242,7 @@ extension WhisperClient {
             progress(Double(i + 1) / Double(count))
         }
 
-        return SubtitleCodec.render(merged, format: responseFormat)
+        let deduplicated = SubtitleCodec.removingAdjacentDuplicates(merged)
+        return SubtitleCodec.render(deduplicated, format: responseFormat)
     }
 }
