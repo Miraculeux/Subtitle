@@ -13,6 +13,13 @@ The Whisper service address is fully configurable.
    `POST /v1/audio/transcriptions` endpoint.
 4. The returned subtitles (SRT or VTT) are shown and can be saved to disk.
 
+After transcription and optional translation finish successfully, the extracted
+WAV is deleted unless **Keep extracted audio after finishing** is enabled in
+Settings. Retained audio also survives switching files or clearing the queue.
+Original input files are never deleted. Failed or cancelled jobs retain their
+working audio for retry. The transcript remains available for re-translation;
+re-running transcription extracts audio again if it has been cleaned up.
+
 ## Configuring the Whisper server
 
 Open **Settings** (⌘,) and set:
@@ -38,6 +45,8 @@ Any server exposing the OpenAI audio transcription API works, for example:
 Requires Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 (`brew install xcodegen`).
 
+Debug and Release builds treat Swift and C/Objective-C compiler warnings as errors.
+
 ```bash
 xcodegen generate
 open Subtitle.xcodeproj   # then Run in Xcode
@@ -50,6 +59,18 @@ xcodegen generate
 xcodebuild -project Subtitle.xcodeproj -scheme Subtitle \
   -configuration Debug -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
 open build/Build/Products/Debug/Subtitle.app
+```
+
+## Audio cleanup regression tests
+
+The standalone tests exercise the real pipeline with mocked transcription and
+translation responses; no running model servers are required.
+
+```bash
+swiftc -warnings-as-errors -target "$(uname -m)-apple-macos14.0" \
+  -parse-as-library Sources/Models/*.swift Sources/Services/*.swift \
+  Tests/AudioCleanupTests.swift -o build/audio-cleanup-tests
+build/audio-cleanup-tests
 ```
 
 ## Project layout

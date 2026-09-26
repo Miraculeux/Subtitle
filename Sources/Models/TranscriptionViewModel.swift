@@ -66,6 +66,7 @@ final class TranscriptionViewModel: ObservableObject {
     /// True when `workingWAV` points at the user's original file (already in the
     /// target format) and therefore must never be deleted.
     private var workingWAVIsExternal = false
+    private var workingWAVIsKept = false
     private var rawTranscript: String?
     private var resumeStep: Step?
     private var currentTask: Task<Void, Never>?
@@ -108,7 +109,7 @@ final class TranscriptionViewModel: ObservableObject {
     /// Marks a step as already completed (for the UI status indicator).
     func isStepDone(_ step: Step) -> Bool {
         switch step {
-        case .extract:   return hasAudio
+        case .extract:   return hasAudio || hasTranscript
         case .transcribe: return hasTranscript
         case .translate:  return stage == .finished && (settings?.translationEnabled ?? false)
         }
@@ -265,12 +266,23 @@ final class TranscriptionViewModel: ObservableObject {
         stage = .idle
     }
 
-    private func cleanupWorkingWAV() {
-        if let wav = workingWAV, !workingWAVIsExternal {
-            try? FileManager.default.removeItem(at: wav)
+    @discardableResult
+    private func cleanupWorkingWAV() -> String? {
+        if let wav = workingWAV, !workingWAVIsExternal, !workingWAVIsKept {
+            do {
+                try FileManager.default.removeItem(at: wav)
+            } catch CocoaError.fileNoSuchFile {
+                // The audio may already have been removed outside the app.
+            } catch {
+                let message = "Could not delete extracted audio at \(wav.path): \(error.localizedDescription)"
+                NSLog("%@", message)
+                return message
+            }
         }
         workingWAV = nil
         workingWAVIsExternal = false
+        workingWAVIsKept = false
+        return nil
     }
 
     func start() {
@@ -367,13 +379,16 @@ final class TranscriptionViewModel: ObservableObject {
                     subtitleText = rawTranscript ?? ""
                 }
 
+                try Task.checkCancellation()
                 stage = .finished
-                // Keep the extracted audio and transcript so the user can
-                // re-run any single step (e.g. just re-translate) without
-                // redoing earlier work. Artifacts are cleared on new file.
+                // Keep the transcript for re-translation; transcription can
+                // extract fresh audio when the working WAV has been removed.
+                workingWAVIsKept = settings.keepExtractedAudio && !workingWAVIsExternal
                 let audioNote = (settings.keepExtractedAudio && !workingWAVIsExternal)
                     ? workingWAV.map { "Audio: \($0.path)" } : nil
+                let cleanupWarning = settings.keepExtractedAudio ? nil : cleanupWorkingWAV()
                 autoSaveSubtitle(extraNote: audioNote)
+                if let cleanupWarning { statusMessage += "  •  \(cleanupWarning)" }
                 resumeStep = nil
             } catch {
                 resumeStep = failedAt

@@ -25,7 +25,7 @@ final class AppSettings: ObservableObject {
     @Published var workingDirectory: String { didSet { defaults.set(workingDirectory, forKey: Keys.workingDirectory) } }
     @Published var keepExtractedAudio: Bool { didSet { defaults.set(keepExtractedAudio, forKey: Keys.keepExtractedAudio) } }
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
 
     private enum Keys {
         static let serverURL = "serverURL"
@@ -44,7 +44,8 @@ final class AppSettings: ObservableObject {
         static let keepExtractedAudio = "keepExtractedAudio"
     }
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         serverURL = defaults.string(forKey: Keys.serverURL) ?? "http://127.0.0.1:8080"
         modelName = defaults.string(forKey: Keys.modelName) ?? "whisper-1"
         apiKey = defaults.string(forKey: Keys.apiKey) ?? ""
